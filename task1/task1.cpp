@@ -1,16 +1,7 @@
 #include <algorithm>
 #include <iostream>
-#include <unordered_map>
 #include <unordered_set>
-#include <utility>
 #include <vector>
-
-
-struct Triple {
-    size_t i;
-    size_t j;
-    size_t k;
-};
 
 
 struct Cell {
