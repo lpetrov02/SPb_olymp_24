@@ -21,9 +21,32 @@ struct Cell {
         value = k;
     }
 
+    bool Empty() const {
+        return value == 0;
+    }
+
+    bool IsCandidate(size_t k) const {
+        return Empty() && std::find(variants.begin(), variants.end(), k) != variants.end();
+    }
+
+    bool Determined() const {
+        return Empty() && variants.size() == 1;
+    }
+
+    bool Valid() const {
+        return !Empty() || !variants.empty();
+    }
+
     size_t value;
     std::unordered_set<int> variants;
 };
+
+
+enum SetReturn {
+    NO_ACTIONS_NEEDED = 0,
+    NEEDS_SIMPLIFICATION = 1,
+    INVALID_STATE = 2
+} ;
 
 
 struct Field {
@@ -46,7 +69,7 @@ struct Field {
         for (size_t j = 0; j < n2; ++j) {
             for (size_t i = 0; i < n2; ++i) {
                 sum_vars += cells[j][i].variants.size();
-                to_go += static_cast<size_t>(!cells[j][i].variants.empty());
+                to_go += static_cast<size_t>(cells[j][i].Empty());
             }
         }
     }
@@ -54,7 +77,7 @@ struct Field {
     bool IsValid() const {
         for (size_t j = 0; j < n2; ++j) {
             for (size_t i = 0; i < n2; ++i) {
-                if (cells[j][i].variants.empty() && cells[j][i].value == 0) {
+                if (!cells[j][i].Valid()) {
                     return false;
                 }
             }
@@ -62,19 +85,46 @@ struct Field {
         return true;
     }
     
-    void Set(size_t j, size_t i, size_t k) {
+    SetReturn Set(size_t j, size_t i, size_t k) {
+        SetReturn ret = SetReturn::NO_ACTIONS_NEEDED;
+        if (!cells[j][i].Empty()) {
+            return ret;
+        }
+
+        if (k > 0) {
+            --to_go;
+            sum_vars -= cells[j][i].variants.size();
+        }
         cells[j][i].Set(k);
+
         for (size_t l = 0; l < n2; ++l) {
+            sum_vars -= (static_cast<int>(cells[j][l].IsCandidate(k))
+                        + static_cast<int>(cells[l][i].IsCandidate(k)));
             cells[j][l].variants.erase(k);
             cells[l][i].variants.erase(k);
+            
+            if (cells[j][l].Determined() || cells[l][i].Determined()) {
+                ret = SetReturn::NEEDS_SIMPLIFICATION;
+            }
+            if (!cells[j][l].Valid() || !cells[l][i].Valid()) {
+                return SetReturn::INVALID_STATE;
+            }
         }
 
         size_t y = j / n * n, x = i / n * n;
         for (size_t j = y; j < y + n; ++j) {
             for (size_t i = x; i < x + n; ++i) {
+                sum_vars -= static_cast<int>(cells[j][i].IsCandidate(k));
                 cells[j][i].variants.erase(k);
+                if (cells[j][i].Determined()) {
+                    ret = SetReturn::NEEDS_SIMPLIFICATION;
+                }
+                if (!cells[j][i].Valid()) {
+                    return SetReturn::INVALID_STATE;
+                }
             }
         }
+        return ret;
     }
 
     void Simplify() {
@@ -83,13 +133,14 @@ struct Field {
             improves = false;
             for (size_t j = 0; j < n2; ++j) {
                 for (size_t i = 0; i < n2; ++i) {
-                    if (cells[j][i].variants.size() == 1) {
+                    if (cells[j][i].Determined()) {
                         improves = true;
                         Set(j, i, *(cells[j][i].variants.begin()));
                     }
                 }
             }
         }
+        SetStats();
     }
 
     size_t n2, n;
@@ -116,6 +167,19 @@ size_t Sqrt(size_t n) {
 }
 
 
+void PrintState(const Field& field) {
+    for (size_t j = 0; j < field.n2; ++j) {
+        for (size_t i = 0; i < field.n2; ++i) {
+            if (i > 0) {
+                std::cout << " ";
+            }
+            std::cout << field.cells[j][i].value;
+        }
+        std::cout << std::endl;
+    }
+}
+
+
 int main() {
     size_t n2, n, k;
     std::cin >> n2;
@@ -136,7 +200,6 @@ int main() {
         }
     }
     f.Simplify();
-    f.SetStats();
 
     std::vector<Field> open = { f };
 
@@ -146,22 +209,14 @@ int main() {
         open.pop_back();
 
         if (v.to_go == 0) {
-            for (size_t j = 0; j < n2; ++j) {
-                for (size_t i = 0; i < n2; ++i) {
-                    if (i > 0) {
-                        std::cout << " ";
-                    }
-                    std::cout << v.cells[j][i].value;
-                }
-                std::cout << std::endl;
-            }
+            PrintState(v);
             return 0;
         }
 
         size_t best_i = 0, best_j = 0, min_vars = n2 + 1;
         for (size_t j = 0; j < n2; ++j) {
             for (size_t i = 0; i < n2; ++i) {
-                if (0 < v.cells[j][i].variants.size() && v.cells[j][i].variants.size() < min_vars) {
+                if (v.cells[j][i].Empty() && v.cells[j][i].variants.size() < min_vars) {
                     min_vars = v.cells[j][i].variants.size(), best_i = i, best_j = j;
                 }
             }
@@ -169,10 +224,11 @@ int main() {
 
         for (auto k : v.cells[best_j][best_i].variants) {
             Field new_f = v;
-            new_f.Set(best_j, best_i, k);
-            new_f.Simplify();
-            new_f.SetStats();
-            if (new_f.IsValid()) {
+            SetReturn ret = new_f.Set(best_j, best_i, k);
+            if (ret == SetReturn::NEEDS_SIMPLIFICATION) {
+                new_f.Simplify();
+            }
+            if (ret != SetReturn::INVALID_STATE && new_f.IsValid()) {
                 open.push_back(new_f);
                 std::push_heap(open.begin(), open.end());
             }
